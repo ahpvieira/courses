@@ -1,0 +1,248 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+To get started analyzing Prince's lyrics, load the libraries below. 
+
+```{r}
+library(dplyr) #Data manipulation (also included in the tidyverse package)
+library(tidytext) #Text mining
+library(tidyr) #Spread, separate, unite, text mining (also included in the tidyverse package)
+library(widyr) #Use for pairwise correlation
+
+#Visualizations!
+library(ggplot2) #Visualizations (also included in the tidyverse package)
+library(ggrepel) #`geom_label_repel`
+library(gridExtra) #`grid.arrange()` for multi-graphs
+library(knitr) #Create nicely formatted output tables
+library(kableExtra) #Create nicely formatted output tables
+library(formattable) #For the color_tile function
+library(circlize) #Visualizations - chord diagram
+library(memery) #Memes - images with plots
+library(magick) #Memes - images with plots (image_read)
+library(yarrr)  #Pirate plot
+library(radarchart) #Visualizations
+library(igraph) #ngram network diagrams
+library(ggraph) #ngram network diagrams
+
+#Define some colors to use throughout
+my_colors <- c("#E69F00", "#56B4E9", "#009E73", "#CC79A7", "#D55E00", "#D65E00")
+
+#Customize ggplot2's default theme settings
+#This tutorial doesn't actually pass any parameters, but you may use it again in future tutorials so it's nice to have the options
+theme_lyrics <- function(aticks = element_blank(),
+                         pgminor = element_blank(),
+                         lt = element_blank(),
+                         lp = "none")
+{
+  theme(plot.title = element_text(hjust = 0.5), #Center the title
+        axis.ticks = aticks, #Set axis ticks to on or off
+        panel.grid.minor = pgminor, #Turn the minor grid lines on or off
+        legend.title = lt, #Turn the legend title on or off
+        legend.position = lp) #Turn the legend on or off
+}
+
+#Customize the text tables for consistency using HTML formatting
+my_kable_styling <- function(dat, caption) {
+  kable(dat, "html", escape = FALSE, caption = caption) %>%
+  kable_styling(bootstrap_options = c("striped", "condensed", "bordered"),
+                full_width = FALSE)
+}
+```
+
+Read and clean the data.
+
+Here are a few remaining data wrangling steps:
+
+* Remove undesirable words (manual list of unnecessary words)
+* Remove stop words (overly common words such as "and", "the", "a", "of", etc.)
+* Remove words with fewer than three characters (often used for phonetic effect in music)
+* Split the lyrics into individual words
+
+```{r}
+setwd("C:/Users/ahpvi/Documents/cursos/text_mining/lyrics")
+prince_data <- readr::read_csv('prince_new.csv')
+prince_data$X1 <- NULL
+glimpse(prince_data)
+
+#Created in the first tutorial
+undesirable_words <- c("prince", "chorus", "repeat", "lyrics",
+                       "theres", "bridge", "fe0f", "yeah", "baby",
+                       "alright", "wanna", "gonna", "chorus", "verse",
+                       "whoa", "gotta", "make", "miscellaneous", "2",
+                       "4", "ooh", "uurh", "pheromone", "poompoom", "3121",
+                       "matic", " ai ", " ca ", " la ", "hey", " na ",
+                       " da ", " uh ", " tin ", "  ll", "transcription",
+                       "repeats", "la", "da", "uh", "ah")
+
+#Create tidy text format: Unnested, Unsummarized, -Undesirables, Stop and Short words
+prince_tidy <- prince_data %>%
+  unnest_tokens(word, lyrics) %>% #Break the lyrics into individual words
+  filter(!word %in% undesirable_words) %>% #Remove undesirables
+  filter(!nchar(word) < 3) %>% #Words like "ah" or "oo" used in music
+  anti_join(stop_words) #Data provided by the tidytext package
+``` 
+
+Create the word_summary data frame that calculates the distinct word count per song. The more diverse the lyrics, the larger the vocabulary.
+
+There is a slight upward trend in the unique number of words per song in the early decades: the solid horizontal line shows the mean word count for that decade.
+
+```{r}
+word_summary <- prince_tidy %>%
+  mutate(decade = ifelse(is.na(decade),"NONE", decade)) %>%
+  group_by(decade, song) %>%
+  mutate(word_count = n_distinct(word)) %>%
+  select(song, Released = decade, Charted = charted, word_count) %>%
+  distinct() %>% #To obtain one record per song
+  ungroup()
+
+pirateplot(formula =  word_count ~ Released + Charted, #Formula
+   data = word_summary, #Data frame
+   xlab = NULL, ylab = "Song Distinct Word Count", #Axis labels
+   main = "Lexical Diversity Per Decade", #Plot title
+   pal = "google", #Color scheme
+   point.o = .2, #Points
+   avg.line.o = 1, #Turn on the Average/Mean line
+   theme = 0, #Theme
+   point.pch = 16, #Point `pch` type
+   point.cex = 1.5, #Point size
+   jitter.val = .1, #Turn on jitter to see the songs better
+   cex.lab = .9, cex.names = .7) #Axis label size
+```
+
+Circular graphs are a unique way to visualize complicated (or simple!) relationships among several categories. (Plus, albums used to be round!).
+
+```{r}
+songs_year <- prince_data %>%
+  select(song, year) %>%
+  group_by(year) %>%
+  summarise(song_count = n())
+
+id <- seq_len(nrow(songs_year))
+songs_year <- cbind(songs_year, id)
+label_data = songs_year
+number_of_bar = nrow(label_data) #Calculate the ANGLE of the labels
+angle = 90 - 360 * (label_data$id - 0.5) / number_of_bar #Center things
+label_data$hjust <- ifelse(angle < -90, 1, 0) #Align label
+label_data$angle <- ifelse(angle < -90, angle + 180, angle) #Flip angle
+ggplot(songs_year, aes(x = as.factor(id), y = song_count)) +
+  geom_bar(stat = "identity", fill = alpha("purple", 0.7)) +
+  geom_text(data = label_data, aes(x = id, y = song_count + 10, label = year, hjust = hjust), color = "black", alpha = 0.6, size = 3, angle =  label_data$angle, inherit.aes = FALSE ) +
+  coord_polar(start = 0) +
+  ylim(-20, 150) + #Size of the circle
+  theme_minimal() +
+  theme(axis.text = element_blank(),
+        axis.title = element_blank(),
+        panel.grid = element_blank(),
+        plot.margin = unit(rep(-4,4), "in"),
+        plot.title = element_text(margin = margin(t = 10, b = -10)))
+```
+
+The following graph shows the relationship between the decade a song was released and whether or not it hit the Billboard charts. 
+
+```{r}
+decade_chart <-  prince_data %>%
+  filter(decade != "NA") %>% #Remove songs without release dates
+  count(decade, charted)  #Get SONG count per chart level per decade. Order determines top or bottom.
+
+circos.clear() #Very important - Reset the circular layout parameters!
+grid.col = c("1970s" = my_colors[1], "1980s" = my_colors[2], "1990s" = my_colors[3], "2000s" = my_colors[4], "2010s" = my_colors[5], "Charted" = "grey", "Uncharted" = "grey") #assign chord colors
+# Set the global parameters for the circular layout. Specifically the gap size
+circos.par(gap.after = c(rep(5, length(unique(decade_chart[[1]])) - 1), 15,
+                         rep(5, length(unique(decade_chart[[2]])) - 1), 15))
+
+chordDiagram(decade_chart, grid.col = grid.col, transparency = .2)
+title("Relationship Between Chart and Decade")
+```
+
+## Lexicons and Lyrics
+
+In this section you will:
+
+* Explore the sentiment lexicons and their word counts
+* Identify how many words from the lyrics exist in the lexicons
+* Look at specific words and word forms
+* Consider additional data conditioning
+
+
+n order to examine the lexicons, create a data frame called new_sentiments. Filter out a financial lexicon, create a binary (also described as polar) sentiment field for the AFINN lexicon by converting the numerical score to positive or negative, and add a field that holds the distinct word count for each lexicon.
+
+```{r}
+new_sentiments <- sentiments %>% #From the tidytext package
+  filter(lexicon != "loughran") %>% #Remove the finance lexicon
+  mutate( sentiment = ifelse(lexicon == "AFINN" & score >= 0, "positive",
+                              ifelse(lexicon == "AFINN" & score < 0,
+                                     "negative", sentiment))) %>%
+  group_by(lexicon) %>%
+  mutate(words_in_lexicon = n_distinct(word)) %>%
+  ungroup()
+
+new_sentiments %>%
+  group_by(lexicon, sentiment, words_in_lexicon) %>%
+  summarise(distinct_words = n_distinct(word)) %>%
+  ungroup() %>%
+  spread(sentiment, distinct_words) %>%
+  mutate(lexicon = color_tile("lightblue", "lightblue")(lexicon),
+         words_in_lexicon = color_bar("lightpink")(words_in_lexicon)) %>%
+  my_kable_styling(caption = "Word Counts Per Lexicon")
+```
+
+In order to determine which lexicon is more applicable to the lyrics, you'll want to look at the match ratio of words that are common to both the lexicon and the lyrics.
+
+Use an inner_join() between prince_tidy and new_sentiments and then group by lexicon. 
+
+```{r}
+prince_tidy %>%
+  mutate(words_in_lyrics = n_distinct(word)) %>%
+  inner_join(new_sentiments) %>%
+  group_by(lexicon, words_in_lyrics, words_in_lexicon) %>%
+  summarise(lex_match_words = n_distinct(word)) %>%
+  ungroup() %>%
+  mutate(total_match_words = sum(lex_match_words), #Not used but good to have
+         match_ratio = lex_match_words / words_in_lyrics) %>%
+  select(lexicon, lex_match_words,  words_in_lyrics, match_ratio) %>%
+  mutate(lex_match_words = color_bar("lightpink")(lex_match_words),
+         lexicon = color_tile("lightgreen", "lightgreen")(lexicon)) %>%
+  my_kable_styling(caption = "Lyrics Found In Lexicons")
+```
+
+Take a look at some specific words from Prince's lyrics which seem like they would have an impact on sentiment. Are they in all lexicons?
+
+Controversy and dark appear in NRC and Bing, but gangster only appears in Bing. Race doesn't appear at all and is a critical topic in Prince's lyrics. But is it easily associated with a sentiment? Note that AFINN is much smaller and only has one of these words.
+
+```{r}
+new_sentiments %>%
+  filter(word %in% c("dark", "controversy", "gangster",
+                     "discouraged", "race")) %>%
+  arrange(word) %>% #sort
+  select(-score) %>% #remove this field
+  mutate(word = color_tile("lightblue", "lightblue")(word),
+         words_in_lexicon = color_bar("lightpink")(words_in_lexicon),
+         lexicon = color_tile("lightgreen", "lightgreen")(lexicon)) %>%
+  my_kable_styling(caption = "Specific Words")
+```
+
+
+
+```{r}
+
+```
+
+
+
+```{r}
+
+```
+
+
+
+```{r}
+
+```
+
+
+
+
+
+
